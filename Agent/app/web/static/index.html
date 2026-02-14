@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>合同合规审查控制台</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Arial, sans-serif;
+        margin: 0;
+        background: #f6f7fb;
+        color: #1f2937;
+      }
+      .container {
+        max-width: 1100px;
+        margin: 32px auto;
+        padding: 0 20px 48px;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+      }
+      .header h1 {
+        font-size: 24px;
+        margin: 0;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 20px;
+      }
+      .card {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+        padding: 20px;
+      }
+      .card h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+      }
+      .button {
+        background: #2563eb;
+        border: none;
+        color: #fff;
+        padding: 10px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .button.secondary {
+        background: #e2e8f0;
+        color: #1f2937;
+      }
+      .actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      input[type="file"] {
+        display: block;
+        margin-top: 8px;
+      }
+      .status {
+        margin-top: 12px;
+        font-size: 13px;
+        color: #475569;
+        white-space: pre-wrap;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+        font-size: 13px;
+      }
+      th,
+      td {
+        padding: 8px 6px;
+        border-bottom: 1px solid #e2e8f0;
+        text-align: left;
+      }
+      td.actions-cell {
+        white-space: nowrap;
+      }
+      .link-button {
+        border: none;
+        background: none;
+        color: #2563eb;
+        cursor: pointer;
+        padding: 0;
+        font-size: 13px;
+      }
+      .preview {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 12px;
+        border-radius: 8px;
+        margin-top: 12px;
+        max-height: 240px;
+        overflow: auto;
+        white-space: pre-wrap;
+        font-size: 12px;
+      }
+      .result {
+        margin-top: 24px;
+        background: #fff;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+      }
+      .result h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+      }
+      .score {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: #eef2ff;
+        color: #1e3a8a;
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .summary {
+        margin-top: 12px;
+        font-size: 14px;
+      }
+      .issues {
+        margin-top: 16px;
+        display: grid;
+        gap: 12px;
+      }
+      .issue-card {
+        background: #f8fafc;
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid #e2e8f0;
+      }
+      .issue-card h3 {
+        margin: 0 0 6px;
+        font-size: 14px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        margin-left: 6px;
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .badge.low {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .badge.medium {
+        background: #fef9c3;
+        color: #854d0e;
+      }
+      .citation-panel {
+        margin-top: 16px;
+        background: #f8fafc;
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid #e2e8f0;
+      }
+      .citation-title {
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .citation-content {
+        max-height: 260px;
+        overflow: auto;
+        background: #0b1120;
+        color: #e2e8f0;
+        padding: 12px;
+        border-radius: 8px;
+        white-space: pre-wrap;
+        font-size: 12px;
+      }
+      .highlight {
+        background: #fde68a;
+        color: #7c2d12;
+        padding: 0 2px;
+        border-radius: 4px;
+      }
+      .json-view {
+        margin-top: 16px;
+        background: #0b1120;
+        color: #e2e8f0;
+        border-radius: 10px;
+        padding: 12px;
+        max-height: 320px;
+        overflow: auto;
+        white-space: pre-wrap;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>合同合规审查控制台</h1>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h2>上传合同</h2>
+          <div>支持格式：PDF、DOCX</div>
+          <input id="contractFile" type="file" accept=".pdf,.docx" />
+          <div class="actions">
+            <button class="button" onclick="uploadContract()">上传合同</button>
+          </div>
+          <div id="contractStatus" class="status"></div>
+        </div>
+        <div class="card">
+          <h2>执行审计</h2>
+          <div>选择已上传合同进行合规审查</div>
+          <select id="contractSelect" style="margin-top: 8px; width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #e2e8f0">
+            <option value="">请选择合同文件</option>
+          </select>
+          <div class="actions">
+            <button class="button" onclick="runAudit()">执行审计</button>
+            <button class="button secondary" onclick="loadContracts()">刷新合同列表</button>
+          </div>
+          <div id="auditStatus" class="status"></div>
+        </div>
+        <div class="card">
+          <h2>法律文件管理</h2>
+          <div>支持格式：TXT、MD、PDF、DOCX</div>
+          <input id="legalFile" type="file" accept=".txt,.md,.pdf,.docx" />
+          <div class="actions">
+            <button class="button" onclick="uploadLegal()">上传法律文件</button>
+            <button class="button secondary" onclick="loadLegalFiles()">刷新列表</button>
+          </div>
+          <div id="legalStatus" class="status"></div>
+          <table>
+            <thead>
+              <tr>
+                <th>文件名</th>
+                <th>大小</th>
+                <th>修改时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="legalTable"></tbody>
+          </table>
+          <div id="legalPreview" class="preview" style="display: none"></div>
+        </div>
+      </div>
+      <div class="result" id="auditResult" style="display: none">
+        <h2>审计结果</h2>
+        <div id="resultScore" class="score"></div>
+        <div id="resultSummary" class="summary"></div>
+        <div id="resultIssues" class="issues"></div>
+        <div id="citationPanel" class="citation-panel" style="display: none">
+          <div id="citationTitle" class="citation-title"></div>
+          <div id="citationContent" class="citation-content"></div>
+        </div>
+        <div id="resultJson" class="json-view"></div>
+      </div>
+    </div>
+    <script>
+      async function uploadContract() {
+        const fileInput = document.getElementById("contractFile");
+        const status = document.getElementById("contractStatus");
+        if (!fileInput.files.length) {
+          status.textContent = "请选择合同文件";
+          return;
+        }
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+        status.textContent = "上传中...";
+        try {
+          const response = await fetch("/api/contract/upload", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            status.textContent = data.error || "上传失败";
+            return;
+          }
+          status.textContent = `已上传：${data.name} (${data.size} bytes)`;
+          fileInput.value = "";
+          await loadContracts();
+        } catch (error) {
+          status.textContent = "上传失败";
+        }
+      }
+
+      async function uploadLegal() {
+        const fileInput = document.getElementById("legalFile");
+        const status = document.getElementById("legalStatus");
+        if (!fileInput.files.length) {
+          status.textContent = "请选择法律文件";
+          return;
+        }
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+        status.textContent = "上传中...";
+        try {
+          const response = await fetch("/api/legal/upload", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            status.textContent = data.error || "上传失败";
+            return;
+          }
+          status.textContent = `已上传：${data.name}`;
+          fileInput.value = "";
+          await loadLegalFiles();
+        } catch (error) {
+          status.textContent = "上传失败";
+        }
+      }
+
+      async function loadLegalFiles() {
+        const table = document.getElementById("legalTable");
+        const preview = document.getElementById("legalPreview");
+        const status = document.getElementById("legalStatus");
+        preview.style.display = "none";
+        status.textContent = "加载中...";
+        try {
+          const response = await fetch("/api/legal");
+          const data = await response.json();
+          if (!response.ok) {
+            status.textContent = data.error || "加载失败";
+            return;
+          }
+          table.innerHTML = "";
+          for (const file of data.files) {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+              <td>${file.name}</td>
+              <td>${file.size}</td>
+              <td>${file.modified}</td>
+              <td class="actions-cell">
+                <button class="link-button" onclick="viewLegal('${encodeURIComponent(file.path)}')">查看</button>
+                <button class="link-button" onclick="deleteLegal('${encodeURIComponent(file.path)}')">删除</button>
+              </td>
+            `;
+            table.appendChild(row);
+          }
+          status.textContent = `共 ${data.files.length} 个文件`;
+        } catch (error) {
+          status.textContent = "加载失败";
+        }
+      }
+
+      async function loadContracts() {
+        const select = document.getElementById("contractSelect");
+        const status = document.getElementById("auditStatus");
+        status.textContent = "加载中...";
+        try {
+          const response = await fetch("/api/contract/list");
+          const data = await response.json();
+          if (!response.ok) {
+            status.textContent = data.error || "加载失败";
+            return;
+          }
+          select.innerHTML = `<option value="">请选择合同文件</option>`;
+          for (const file of data.files) {
+            const option = document.createElement("option");
+            option.value = file.path;
+            option.textContent = `${file.name} (${file.modified})`;
+            select.appendChild(option);
+          }
+          status.textContent = `共 ${data.files.length} 个合同`;
+        } catch (error) {
+          status.textContent = "加载失败";
+        }
+      }
+
+      async function runAudit() {
+        const select = document.getElementById("contractSelect");
+        const status = document.getElementById("auditStatus");
+        const resultBox = document.getElementById("auditResult");
+        if (!select.value) {
+          status.textContent = "请选择合同文件";
+          return;
+        }
+        status.textContent = "审计中...";
+        resultBox.style.display = "none";
+        try {
+          const response = await fetch("/api/audit/run", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ contract: select.value }),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            status.textContent = data.error || "审计失败";
+            return;
+          }
+          status.textContent = "审计完成";
+          renderAuditResult(data.result);
+        } catch (error) {
+          status.textContent = "审计失败";
+        }
+      }
+
+      function renderAuditResult(result) {
+        const resultBox = document.getElementById("auditResult");
+        const score = document.getElementById("resultScore");
+        const summary = document.getElementById("resultSummary");
+        const issues = document.getElementById("resultIssues");
+        const jsonView = document.getElementById("resultJson");
+        const citationPanel = document.getElementById("citationPanel");
+        const citationTitle = document.getElementById("citationTitle");
+        const citationContent = document.getElementById("citationContent");
+        const riskScore = result.overall_risk_score ?? "-";
+        score.textContent = `风险评分：${riskScore}`;
+        summary.textContent = result.summary || "";
+        issues.innerHTML = "";
+        citationPanel.style.display = "none";
+        citationTitle.textContent = "";
+        citationContent.textContent = "";
+        for (const issue of result.issues || []) {
+          const card = document.createElement("div");
+          card.className = "issue-card";
+          const title = document.createElement("h3");
+          const level = issue.risk_level || "";
+          const badge = document.createElement("span");
+          badge.className =
+            level === "低" ? "badge low" : level === "中" ? "badge medium" : "badge";
+          badge.textContent = level;
+          title.textContent = issue.clause_excerpt || "条款";
+          title.appendChild(badge);
+          const reason = document.createElement("div");
+          reason.textContent = `风险原因：${issue.risk_reason || ""}`;
+          const suggestion = document.createElement("div");
+          suggestion.textContent = `修订建议：${issue.suggestion || ""}`;
+          const citationsWrap = document.createElement("div");
+          citationsWrap.style.marginTop = "6px";
+          citationsWrap.style.display = "grid";
+          citationsWrap.style.gap = "6px";
+          for (const item of issue.legal_citations || []) {
+            const row = document.createElement("div");
+            const link = document.createElement("a");
+            link.className = "link-button";
+            link.textContent = `[${item.source_path}] ${item.article_no || ""}`.trim();
+            link.href = "javascript:void(0)";
+            link.addEventListener("click", () =>
+              openCitation(item.source_path || "", item.quote || "")
+            );
+            const quote = document.createElement("div");
+            quote.style.whiteSpace = "pre-wrap";
+            quote.textContent = item.quote || "";
+            row.appendChild(link);
+            row.appendChild(quote);
+            citationsWrap.appendChild(row);
+          }
+          card.appendChild(title);
+          card.appendChild(reason);
+          card.appendChild(suggestion);
+          card.appendChild(citationsWrap);
+          issues.appendChild(card);
+        }
+        jsonView.textContent = JSON.stringify(result, null, 2);
+        resultBox.style.display = "block";
+        resultBox.scrollIntoView({ behavior: "smooth" });
+      }
+
+      function escapeHtml(text) {
+        return text
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+      }
+
+      function isMeaningfulChar(ch) {
+        return /[A-Za-z0-9\u4e00-\u9fff]/.test(ch);
+      }
+
+      function normalizeText(text) {
+        return text
+          .split("")
+          .filter((ch) => isMeaningfulChar(ch))
+          .join("")
+          .toLowerCase();
+      }
+
+      function buildNormalizedMap(raw) {
+        const map = [];
+        let normalized = "";
+        let normalizedIndex = 0;
+        for (let i = 0; i < raw.length; i += 1) {
+          const ch = raw[i];
+          if (!isMeaningfulChar(ch)) {
+            continue;
+          }
+          map[normalizedIndex] = i;
+          normalizedIndex += 1;
+          normalized += ch.toLowerCase();
+        }
+        return { normalized, map };
+      }
+
+      function findNormalizedRangeFromMap(mapData, quote) {
+        const normalizedRaw = mapData.normalized;
+        const normalizedQuote = normalizeText(quote);
+        if (!normalizedQuote) {
+          return null;
+        }
+        const index = normalizedRaw.indexOf(normalizedQuote);
+        if (index < 0) {
+          return null;
+        }
+        const start = mapData.map[index];
+        const end = mapData.map[index + normalizedQuote.length - 1];
+        if (start === undefined || end === undefined) {
+          return null;
+        }
+        return { start, end: end + 1 };
+      }
+
+      function findSnippetRangeFromMap(mapData, quote) {
+        const normalizedRaw = mapData.normalized;
+        const normalizedQuote = normalizeText(quote);
+        if (!normalizedQuote) {
+          return null;
+        }
+        const size = Math.min(24, normalizedQuote.length);
+        if (size < 6) {
+          return null;
+        }
+        const head = normalizedQuote.slice(0, size);
+        let index = normalizedRaw.indexOf(head);
+        if (index < 0) {
+          const tail = normalizedQuote.slice(-size);
+          index = normalizedRaw.indexOf(tail);
+          if (index < 0) {
+            return null;
+          }
+        }
+        const start = mapData.map[index];
+        const end = mapData.map[index + size - 1];
+        if (start === undefined || end === undefined) {
+          return null;
+        }
+        return { start, end: end + 1 };
+      }
+
+      async function openCitation(path, quote) {
+        const panel = document.getElementById("citationPanel");
+        const title = document.getElementById("citationTitle");
+        const content = document.getElementById("citationContent");
+        if (!path) {
+          panel.style.display = "none";
+          return;
+        }
+        title.textContent = `条文来源：${path}`;
+        content.textContent = "加载中...";
+        panel.style.display = "block";
+        try {
+          const response = await fetch(`/api/legal/content?path=${encodeURIComponent(path)}`);
+          const data = await response.json();
+          if (!response.ok) {
+            content.textContent = data.error || "读取失败";
+            return;
+          }
+          const raw = data.content || "";
+          const safe = escapeHtml(raw);
+          const mapData = buildNormalizedMap(raw);
+          if (quote) {
+            const index = raw.indexOf(quote);
+            if (index >= 0) {
+              const before = escapeHtml(raw.slice(0, index));
+              const hit = escapeHtml(raw.slice(index, index + quote.length));
+              const after = escapeHtml(raw.slice(index + quote.length));
+              content.innerHTML = `${before}<span class="highlight">${hit}</span>${after}`;
+              const marker = content.querySelector(".highlight");
+              if (marker) {
+                marker.scrollIntoView({ behavior: "smooth", block: "center" });
+              }
+              return;
+            }
+            const range = findNormalizedRangeFromMap(mapData, quote);
+            if (range) {
+              const before = escapeHtml(raw.slice(0, range.start));
+              const hit = escapeHtml(raw.slice(range.start, range.end));
+              const after = escapeHtml(raw.slice(range.end));
+              content.innerHTML = `${before}<span class="highlight">${hit}</span>${after}`;
+              const marker = content.querySelector(".highlight");
+              if (marker) {
+                marker.scrollIntoView({ behavior: "smooth", block: "center" });
+              }
+              return;
+            }
+            const snippetRange = findSnippetRangeFromMap(mapData, quote);
+            if (snippetRange) {
+              const before = escapeHtml(raw.slice(0, snippetRange.start));
+              const hit = escapeHtml(raw.slice(snippetRange.start, snippetRange.end));
+              const after = escapeHtml(raw.slice(snippetRange.end));
+              content.innerHTML = `${before}<span class="highlight">${hit}</span>${after}`;
+              const marker = content.querySelector(".highlight");
+              if (marker) {
+                marker.scrollIntoView({ behavior: "smooth", block: "center" });
+              }
+              return;
+            }
+          }
+          content.innerHTML = safe;
+        } catch (error) {
+          content.textContent = "读取失败";
+        }
+      }
+
+      async function viewLegal(path) {
+        const preview = document.getElementById("legalPreview");
+        preview.style.display = "block";
+        preview.textContent = "加载中...";
+        try {
+          const response = await fetch(`/api/legal/content?path=${path}`);
+          const data = await response.json();
+          if (!response.ok) {
+            preview.textContent = data.error || "读取失败";
+            return;
+          }
+          preview.textContent = data.content || "无内容";
+        } catch (error) {
+          preview.textContent = "读取失败";
+        }
+      }
+
+      async function deleteLegal(path) {
+        const status = document.getElementById("legalStatus");
+        status.textContent = "删除中...";
+        try {
+          const response = await fetch(`/api/legal?path=${path}`, {
+            method: "DELETE",
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            status.textContent = data.error || "删除失败";
+            return;
+          }
+          status.textContent = `已删除：${data.deleted}`;
+          await loadLegalFiles();
+        } catch (error) {
+          status.textContent = "删除失败";
+        }
+      }
+
+      loadLegalFiles();
+      loadContracts();
+    </script>
+  </body>
+</html>

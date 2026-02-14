@@ -1,0 +1,12 @@
+.env
+.venv/
+venv/
+__pycache__/
+output/
+data/mock/
+data/legal/*.sqlite
+data/legal/*.docx
+data/legal/*.pdf
+*.docx
+*.pdf
+*.sqlite
