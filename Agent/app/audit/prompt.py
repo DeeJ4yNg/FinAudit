@@ -1,36 +1,59 @@
 def build_system_prompt() -> str:
     return (
-        "你是法律合规审查助手，负责对合同文本进行合规性评估、风险评分与修订建议。"
-        "必须引用法律条文并输出可追溯的条文编号与出处。"
+        "你是一名严谨的税务法律专家。你的任务是基于用户提供的合同文本和法规文本，"
+        "对合同进行证据化审阅，识别法律与涉税风险，并给出可执行的修改建议。"
+        "仅基于提供的文本作出判断，严禁臆测未提供事实。"
+        "每个风险必须同时绑定合同证据与法规证据。"
         "仅输出JSON，不要包含多余文字。"
     )
 
 
 def build_user_prompt(contract_text: str, legal_context: str) -> str:
     return (
-        "任务：根据合同文本，结合参考法律条文，输出合规审查报告JSON。\n"
+        "任务：根据合同文本，结合参考法律条文，输出税务法律合规审查JSON。\n"
         "要求：\n"
         "1) 输出字段必须严格匹配JSON结构\n"
-        "2) 每个问题必须引用法律条文（source_path + article_no + quote）\n"
-        "3) 风险评分区间0-100，评分越高代表越高风险\n"
-        "4) 修订意见应可直接用于修改合同条款\n"
+        "2) 每个风险必须包含合同证据与法规证据（source_path + law_ref_id + quote）\n"
+        "3) 风险评分按 L(1-5) * I(1-5) 计算，分值1-25\n"
+        "4) 风险等级映射：16-25=高，9-15=中，1-8=低\n"
+        "5) 中高风险必须给出可直接替换的条款文本\n"
+        "6) 不确定事项必须标记为待确认\n"
         "JSON结构：\n"
         "{\n"
-        '  "overall_risk_score": 0,\n'
         '  "summary": "一句话总结",\n'
-        '  "issues": [\n'
+        '  "overall": {\n'
+        '    "risk_count": {"high": 0, "medium": 0, "low": 0}\n'
+        "  },\n"
+        '  "delta": {\n'
+        '    "new_risks": [],\n'
+        '    "changed_risks": [],\n'
+        '    "closed_risks": [],\n'
+        '    "clause_changes": []\n'
+        "  },\n"
+        '  "risks": [\n'
         "    {\n"
-        '      "clause_excerpt": "合同原文摘录",\n'
-        '      "risk_level": "高/中/低",\n'
-        '      "risk_reason": "风险原因",\n'
-        '      "legal_citations": [\n'
+        '      "risk_id": "R-001",\n'
+        '      "clause_id": "C-文档号-章节号-条款号",\n'
+        '      "title": "风险标题",\n'
+        '      "level": "高/中/低",\n'
+        '      "score": 0,\n'
+        '      "likelihood": 1,\n'
+        '      "impact": 1,\n'
+        '      "confidence": "高/中/低",\n'
+        '      "tags": ["tax-burden"],\n'
+        '      "contract_evidence": "合同原文证据片段",\n'
+        '      "law_evidence": [\n'
         "        {\n"
         '          "source_path": "法律文件路径",\n'
-        '          "article_no": "第X条",\n'
+        '          "law_ref_id": "L-文档号-章号-条号",\n'
         '          "quote": "引用条文原文"\n'
         "        }\n"
         "      ],\n"
-        '      "suggestion": "修订建议"\n'
+        '      "risk_reason": "风险说明（1-3句）",\n'
+        '      "trigger": "触发条件",\n'
+        '      "impact_analysis": "影响分析",\n'
+        '      "suggested_text": "建议替换文本",\n'
+        '      "open_questions": ["需确认事项"]\n'
         "    }\n"
         "  ]\n"
         "}\n"

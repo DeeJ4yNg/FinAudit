@@ -76,11 +76,14 @@ def _write_articles_to_sqlite(
 ) -> None:
     if db_path.exists():
         db_path.unlink()
-    client = create_openai_client(
-        api_key=config.embedding_api_key,
-        base_url=config.embedding_base,
-    )
-    embeddings = _embed_articles(client, config.embedding_model, articles)
+    try:
+        client = create_openai_client(
+            api_key=config.embedding_api_key,
+            base_url=config.embedding_base,
+        )
+        embeddings = _embed_articles(client, config.embedding_model, articles)
+    except Exception:
+        embeddings = [[] for _ in articles]
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(

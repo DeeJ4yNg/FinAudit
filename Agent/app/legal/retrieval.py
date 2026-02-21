@@ -29,20 +29,6 @@ def retrieve_top_articles(
         articles
     )
     total_docs = len(articles)
-    client = create_openai_client(
-        api_key=config.embedding_api_key,
-        base_url=config.embedding_base,
-    )
-    query_embedding = embed_texts(
-        client=client,
-        model=config.embedding_model,
-        texts=[contract_text],
-    )[0]
-    article_embeddings = _get_article_embeddings(
-        client=client,
-        model=config.embedding_model,
-        articles=articles,
-    )
     bm25_scores = []
     for index, article in enumerate(articles):
         bm25_scores.append(
@@ -56,14 +42,33 @@ def retrieve_top_articles(
             )
         )
     bm25_norm = _normalize_scores(bm25_scores)
-    scored = []
-    for index, (article, embedding) in enumerate(zip(articles, article_embeddings)):
-        cosine = _cosine_similarity_vector(query_embedding, embedding)
-        cosine_norm = (cosine + 1.0) / 2.0
-        score = 0.6 * cosine_norm + 0.4 * bm25_norm[index]
-        scored.append((score, article))
-    scored.sort(key=lambda item: item[0], reverse=True)
-    return [item[1] for item in scored[:max_articles]]
+    try:
+        client = create_openai_client(
+            api_key=config.embedding_api_key,
+            base_url=config.embedding_base,
+        )
+        query_embedding = embed_texts(
+            client=client,
+            model=config.embedding_model,
+            texts=[contract_text],
+        )[0]
+        article_embeddings = _get_article_embeddings(
+            client=client,
+            model=config.embedding_model,
+            articles=articles,
+        )
+        scored = []
+        for index, (article, embedding) in enumerate(zip(articles, article_embeddings)):
+            cosine = _cosine_similarity_vector(query_embedding, embedding)
+            cosine_norm = (cosine + 1.0) / 2.0
+            score = 0.6 * cosine_norm + 0.4 * bm25_norm[index]
+            scored.append((score, article))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in scored[:max_articles]]
+    except Exception:
+        scored = [(bm25_norm[index], article) for index, article in enumerate(articles)]
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in scored[:max_articles]]
 
 
 def _tokenize(text: str) -> List[str]:

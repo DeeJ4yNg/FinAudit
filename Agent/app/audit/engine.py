@@ -62,7 +62,7 @@ def _truncate(text: str, max_chars: int) -> str:
 
 def _validate_json(json_text: str) -> None:
     data = json.loads(json_text)
-    if "overall_risk_score" not in data:
-        raise ValueError("Missing overall_risk_score")
-    if "issues" not in data:
-        raise ValueError("Missing issues")
+    if "summary" not in data:
+        raise ValueError("Missing summary")
+    if "risks" not in data:
+        raise ValueError("Missing risks")

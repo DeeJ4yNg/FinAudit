@@ -9,6 +9,16 @@ AI agent for contract compliance review with legal rule grounding.
 
 ## Setup
 
+macOS/Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Windows (PowerShell):
+
 ```bash
 python -m venv .venv
 .\.venv\Scripts\activate
@@ -29,13 +39,27 @@ uv:
 
 ```bash
 uv venv
-.\.venv\Scripts\activate
+source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
 ## Configure OpenAI API
 
 Set environment variables before running:
+
+macOS/Linux:
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_MODEL="gpt-4.1-mini"
+export OPENAI_BASE_URL="https://api.openai.com/v1"
+export OPENAI_EMBEDDING_MODEL="text-embedding-3-small"
+export OPENAI_API_KEY_EMBEDDING="your-embedding-api-key"
+export OPENAI_API_BASE_EMBEDDING="https://api.openai.com/v1"
+export USE_FULL_ARTICAL="false"
+```
+
+Windows (PowerShell):
 
 ```bash
 $env:OPENAI_API_KEY="your-api-key"

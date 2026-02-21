@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from typing import Any
 import argparse
 import json
-import cgi
+import tempfile
+
+from fastapi import FastAPI, File, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from Agent.app.audit.engine import run_audit
 from Agent.app.cli import _load_legal_articles
 from Agent.app.config import AppConfig
+from Agent.app.legal.reformat_law import reformat_law_text
 from Agent.app.preprocess.extract_text import extract_text
 from Agent.app.tools.file_read import list_legal_files, read_legal_file
 
@@ -23,60 +27,26 @@ class ServerConfig:
     contract_upload_dir: Path
 
 
-class LegalWebHandler(BaseHTTPRequestHandler):
-    server_version = "LegalWeb/1.0"
+def create_app(config: ServerConfig) -> FastAPI:
+    app = FastAPI()
+    if config.static_dir.exists():
+        app.mount(
+            "/static",
+            StaticFiles(directory=str(config.static_dir)),
+            name="static",
+        )
 
-    def __init__(self, *args, config: ServerConfig, **kwargs):
-        self.config = config
-        super().__init__(*args, **kwargs)
+    @app.get("/")
+    async def serve_index():
+        return _serve_index(config)
 
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        if parsed.path in {"/", "/index.html"}:
-            return self._serve_static("index.html")
-        if parsed.path == "/api/legal":
-            return self._handle_legal_list()
-        if parsed.path == "/api/legal/content":
-            return self._handle_legal_content(parsed)
-        if parsed.path == "/api/contract/list":
-            return self._handle_contract_list()
-        return self._send_json({"error": "Not found"}, status=404)
+    @app.get("/index.html")
+    async def serve_index_alias():
+        return _serve_index(config)
 
-    def do_POST(self):
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/legal/upload":
-            return self._handle_upload(
-                dest_dir=self.config.legal_workspace,
-                allowed_suffixes={".txt", ".md", ".pdf", ".docx"},
-            )
-        if parsed.path == "/api/contract/upload":
-            return self._handle_upload(
-                dest_dir=self.config.contract_upload_dir,
-                allowed_suffixes={".pdf", ".docx"},
-            )
-        if parsed.path == "/api/audit/run":
-            return self._handle_audit_run()
-        return self._send_json({"error": "Not found"}, status=404)
-
-    def do_DELETE(self):
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/legal":
-            return self._handle_legal_delete(parsed)
-        return self._send_json({"error": "Not found"}, status=404)
-
-    def _serve_static(self, name: str):
-        target = self.config.static_dir / name
-        if not target.exists():
-            return self._send_json({"error": "Not found"}, status=404)
-        content = target.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    def _handle_legal_list(self):
-        workspace = self.config.legal_workspace.resolve()
+    @app.get("/api/legal")
+    async def legal_list():
+        workspace = config.legal_workspace.resolve()
         items = []
         for path in list_legal_files(workspace):
             stat = path.stat()
@@ -86,45 +56,134 @@ class LegalWebHandler(BaseHTTPRequestHandler):
                     "path": relative,
                     "name": path.name,
                     "size": stat.st_size,
-                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(
+                        timespec="seconds"
+                    ),
                 }
             )
         items.sort(key=lambda item: item["name"])
-        return self._send_json({"files": items})
+        return JSONResponse({"files": items})
 
-    def _handle_legal_content(self, parsed):
-        params = parse_qs(parsed.query or "")
-        path = params.get("path", [None])[0]
+    @app.get("/api/legal/content")
+    async def legal_content(path: str | None = None):
         if not path:
-            return self._send_json({"error": "path is required"}, status=400)
-        cleaned = path.strip().strip('"').strip("'")
-        if cleaned.startswith("[") and cleaned.endswith("]") and len(cleaned) > 2:
-            cleaned = cleaned[1:-1].strip()
-        if cleaned.startswith("file://"):
-            cleaned = cleaned.replace("file://", "", 1).lstrip("/")
-        target = self._resolve_in_workspace(cleaned)
+            return JSONResponse({"error": "path is required"}, status_code=400)
+        cleaned = _clean_path(path)
+        target = _resolve_in_workspace(config, cleaned)
         if not target or not target.exists():
-            target = self._find_legal_by_name(cleaned)
+            target = _find_legal_by_name(config, cleaned)
         if not target or not target.exists():
-            return self._send_json({"error": "file not found"}, status=404)
-        text = read_legal_file(target, self.config.legal_workspace)
-        return self._send_json({"path": path, "content": text})
+            return JSONResponse({"error": "file not found"}, status_code=404)
+        text = read_legal_file(target, config.legal_workspace)
+        return JSONResponse({"path": path, "content": text})
 
-    def _handle_legal_delete(self, parsed):
-        params = parse_qs(parsed.query or "")
-        path = params.get("path", [None])[0]
+    @app.delete("/api/legal")
+    async def legal_delete(path: str | None = None):
         if not path:
-            return self._send_json({"error": "path is required"}, status=400)
-        target = self._resolve_in_workspace(path)
+            return JSONResponse({"error": "path is required"}, status_code=400)
+        target = _resolve_in_workspace(config, path)
         if not target or not target.exists():
-            return self._send_json({"error": "file not found"}, status=404)
+            return JSONResponse({"error": "file not found"}, status_code=404)
         target.unlink()
-        return self._send_json({"deleted": path})
+        return JSONResponse({"deleted": path})
 
-    def _handle_contract_list(self):
-        folder = self.config.contract_upload_dir.resolve()
+    @app.post("/api/legal/upload")
+    async def legal_upload(file: UploadFile | None = File(None)):
+        if file is None:
+            return JSONResponse({"error": "file is required"}, status_code=400)
+        return await _handle_upload(
+            dest_dir=config.legal_workspace,
+            allowed_suffixes={".txt", ".md", ".pdf", ".docx"},
+            file=file,
+        )
+
+    @app.post("/api/legal/reformat")
+    async def legal_reformat(request: Request):
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            payload = await _read_json_payload(request)
+            if payload is None:
+                return JSONResponse({"error": "invalid json"}, status_code=400)
+            path = payload.get("path")
+            if not path:
+                return JSONResponse({"error": "path is required"}, status_code=400)
+            target = _resolve_in_workspace(config, path)
+            if not target or not target.exists():
+                target = _find_legal_by_name(config, path)
+            if not target or not target.exists():
+                return JSONResponse({"error": "file not found"}, status_code=404)
+            source_text = read_legal_file(target, config.legal_workspace)
+            filename = target.name
+        elif "multipart/form-data" in content_type:
+            form = await request.form()
+            form_file = form.get("file")
+            if not isinstance(form_file, UploadFile):
+                return JSONResponse({"error": "file is required"}, status_code=400)
+            filename = Path(form_file.filename or "").name
+            if not filename:
+                return JSONResponse({"error": "invalid filename"}, status_code=400)
+            suffix = Path(filename).suffix.lower()
+            allowed_suffixes = {".txt", ".md", ".pdf", ".docx"}
+            if suffix not in allowed_suffixes:
+                return JSONResponse({"error": "unsupported file type"}, status_code=400)
+            temp_path = None
+            data = await form_file.read()
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp:
+                    temp.write(data)
+                    temp_path = Path(temp.name)
+                source_text = extract_text(temp_path)
+            finally:
+                if temp_path and temp_path.exists():
+                    temp_path.unlink(missing_ok=True)
+        else:
+            return JSONResponse({"error": "unsupported content type"}, status_code=400)
+        if not source_text.strip():
+            return JSONResponse({"error": "empty content"}, status_code=400)
+        app_config = AppConfig.from_env(legal_workspace=config.legal_workspace, model=None)
+        formatted = reformat_law_text(
+            source_text=source_text,
+            config=app_config,
+            model=None,
+            temperature=0,
+        )
+        return JSONResponse(
+            {
+                "name": filename,
+                "suggested_name": _suggest_reformat_name(filename),
+                "content": formatted,
+            }
+        )
+
+    @app.post("/api/legal/reformat/confirm")
+    async def legal_reformat_confirm(request: Request):
+        payload = await _read_json_payload(request)
+        if payload is None:
+            return JSONResponse({"error": "invalid json"}, status_code=400)
+        path = payload.get("path")
+        content = payload.get("content", "")
+        if not path:
+            return JSONResponse({"error": "path is required"}, status_code=400)
+        if not isinstance(content, str) or not content.strip():
+            return JSONResponse({"error": "content is required"}, status_code=400)
+        target = _resolve_in_workspace(config, path)
+        if not target or not target.exists():
+            target = _find_legal_by_name(config, path)
+        if not target or not target.exists():
+            return JSONResponse({"error": "file not found"}, status_code=404)
+        save_path = config.legal_workspace.resolve() / _suggest_reformat_name(target.name)
+        if save_path.resolve() == target.resolve():
+            save_path.write_text(content, encoding="utf-8")
+            return JSONResponse({"saved": save_path.name, "deleted": None})
+        save_path.write_text(content, encoding="utf-8")
+        target.unlink()
+        return JSONResponse({"saved": save_path.name, "deleted": target.name})
+
+    @app.get("/api/contract/list")
+    async def contract_list():
+        folder = config.contract_upload_dir.resolve()
         if not folder.exists():
-            return self._send_json({"files": []})
+            return JSONResponse({"files": []})
         items = []
         for path in folder.rglob("*"):
             if not path.is_file():
@@ -138,152 +197,182 @@ class LegalWebHandler(BaseHTTPRequestHandler):
                     "path": relative,
                     "name": path.name,
                     "size": stat.st_size,
-                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(
+                        timespec="seconds"
+                    ),
                 }
             )
         items.sort(key=lambda item: item["modified"], reverse=True)
-        return self._send_json({"files": items})
+        return JSONResponse({"files": items})
 
-    def _handle_upload(self, dest_dir: Path, allowed_suffixes: set[str]):
-        content_type = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type:
-            return self._send_json({"error": "multipart/form-data required"}, status=400)
-        form = cgi.FieldStorage(
-            fp=self.rfile,
-            headers=self.headers,
-            environ={
-                "REQUEST_METHOD": "POST",
-                "CONTENT_TYPE": content_type,
-            },
-        )
-        if "file" not in form:
-            return self._send_json({"error": "file is required"}, status=400)
-        file_item = form["file"]
-        if not file_item.filename:
-            return self._send_json({"error": "invalid filename"}, status=400)
-        filename = Path(file_item.filename).name
-        suffix = Path(filename).suffix.lower()
-        if suffix not in allowed_suffixes:
-            return self._send_json({"error": "unsupported file type"}, status=400)
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        target = dest_dir / filename
-        with target.open("wb") as handler:
-            handler.write(file_item.file.read())
-        return self._send_json(
-            {
-                "name": filename,
-                "path": str(target.resolve()),
-                "size": target.stat().st_size,
-            }
+    @app.post("/api/contract/upload")
+    async def contract_upload(file: UploadFile | None = File(None)):
+        if file is None:
+            return JSONResponse({"error": "file is required"}, status_code=400)
+        return await _handle_upload(
+            dest_dir=config.contract_upload_dir,
+            allowed_suffixes={".pdf", ".docx"},
+            file=file,
         )
 
-    def _resolve_in_workspace(self, input_path: str) -> Path | None:
-        workspace = self.config.legal_workspace.resolve()
-        candidate = Path(input_path)
-        if not candidate.is_absolute():
-            candidate = workspace / candidate
-        try:
-            resolved = candidate.resolve()
-            resolved.relative_to(workspace)
-            return resolved
-        except Exception:
-            resolved = candidate.resolve()
-            resolved_str = str(resolved).lower()
-            workspace_str = str(workspace).lower()
-            if resolved_str == workspace_str:
-                return resolved
-            if resolved_str.startswith(workspace_str + "\\") or resolved_str.startswith(
-                workspace_str + "/"
-            ):
-                return resolved
-            return None
-
-    def _find_legal_by_name(self, input_path: str) -> Path | None:
-        name = Path(input_path).name
-        if not name:
-            return None
-        workspace = self.config.legal_workspace.resolve()
-        matches = [path for path in list_legal_files(workspace) if path.name == name]
-        if not matches:
-            stem = Path(name).stem
-            matches = [
-                path for path in list_legal_files(workspace) if path.stem == stem
-            ]
-            if not matches:
-                return None
-        return matches[0]
-
-    def _resolve_in_contracts(self, input_path: str) -> Path | None:
-        folder = self.config.contract_upload_dir.resolve()
-        candidate = Path(input_path)
-        if not candidate.is_absolute():
-            candidate = folder / candidate
-        try:
-            resolved = candidate.resolve()
-            resolved.relative_to(folder)
-            return resolved
-        except Exception:
-            return None
-
-    def _handle_audit_run(self):
-        length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(length) if length > 0 else b"{}"
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except Exception:
-            return self._send_json({"error": "invalid json"}, status=400)
+    @app.post("/api/audit/run")
+    async def audit_run(request: Request):
+        payload = await _read_json_payload(request)
+        if payload is None:
+            return JSONResponse({"error": "invalid json"}, status_code=400)
         contract = payload.get("contract")
         if not contract:
-            return self._send_json({"error": "contract is required"}, status=400)
-        target = self._resolve_in_contracts(contract)
+            return JSONResponse({"error": "contract is required"}, status_code=400)
+        target = _resolve_in_contracts(config, contract)
         if not target or not target.exists():
-            return self._send_json({"error": "contract not found"}, status=404)
-        config = AppConfig.from_env(legal_workspace=self.config.legal_workspace, model=None)
+            return JSONResponse({"error": "contract not found"}, status_code=404)
+        app_config = AppConfig.from_env(legal_workspace=config.legal_workspace, model=None)
         contract_text = extract_text(target)
-        legal_articles = _load_legal_articles(self.config.legal_workspace, config)
-        result = run_audit(contract_text, legal_articles, config)
+        legal_articles = _load_legal_articles(config.legal_workspace, app_config)
+        result = run_audit(contract_text, legal_articles, app_config)
         output = json.loads(result.raw_json)
-        output["issues"] = self._filter_hallucinated_issues(output.get("issues", []))
-        return self._send_json({"result": output})
+        output["risks"] = _filter_hallucinated_risks(config, output.get("risks", []))
+        return JSONResponse({"result": output})
 
-    def _send_json(self, data: dict, status: int = 200):
-        payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
+    return app
 
-    def _filter_hallucinated_issues(self, issues: list[dict]) -> list[dict]:
-        cleaned = []
-        for issue in issues:
-            citations = issue.get("legal_citations") or []
-            if not citations:
-                continue
-            all_valid = True
-            for citation in citations:
-                source_path = (citation or {}).get("source_path", "")
-                if not self._resolve_citation_path(source_path):
-                    all_valid = False
-                    break
-            if all_valid:
-                cleaned.append(issue)
-        return cleaned
 
-    def _resolve_citation_path(self, raw_path: str) -> Path | None:
-        if not raw_path:
+def _serve_index(config: ServerConfig):
+    target = config.static_dir / "index.html"
+    if not target.exists():
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    return FileResponse(target, media_type="text/html")
+
+
+def _clean_path(raw_path: str) -> str:
+    cleaned = raw_path.strip().strip('"').strip("'")
+    if cleaned.startswith("[") and cleaned.endswith("]") and len(cleaned) > 2:
+        cleaned = cleaned[1:-1].strip()
+    if cleaned.startswith("file://"):
+        cleaned = cleaned.replace("file://", "", 1).lstrip("/")
+    return cleaned
+
+
+def _resolve_in_workspace(config: ServerConfig, input_path: str) -> Path | None:
+    workspace = config.legal_workspace.resolve()
+    candidate = Path(input_path)
+    if not candidate.is_absolute():
+        candidate = workspace / candidate
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(workspace)
+        return resolved
+    except Exception:
+        resolved = candidate.resolve()
+        resolved_str = str(resolved).lower()
+        workspace_str = str(workspace).lower()
+        if resolved_str == workspace_str:
+            return resolved
+        if resolved_str.startswith(workspace_str + "\\") or resolved_str.startswith(
+            workspace_str + "/"
+        ):
+            return resolved
+        return None
+
+
+def _find_legal_by_name(config: ServerConfig, input_path: str) -> Path | None:
+    name = Path(input_path).name
+    if not name:
+        return None
+    workspace = config.legal_workspace.resolve()
+    matches = [path for path in list_legal_files(workspace) if path.name == name]
+    if not matches:
+        stem = Path(name).stem
+        matches = [path for path in list_legal_files(workspace) if path.stem == stem]
+        if not matches:
             return None
-        cleaned = raw_path.strip().strip('"').strip("'")
-        if cleaned.startswith("[") and cleaned.endswith("]") and len(cleaned) > 2:
-            cleaned = cleaned[1:-1].strip()
-        if cleaned.startswith("file://"):
-            cleaned = cleaned.replace("file://", "", 1).lstrip("/")
-        target = self._resolve_in_workspace(cleaned)
-        if target and target.exists():
-            return target
-        target = self._find_legal_by_name(cleaned)
-        if target and target.exists():
-            return target
+    return matches[0]
+
+
+def _resolve_in_contracts(config: ServerConfig, input_path: str) -> Path | None:
+    folder = config.contract_upload_dir.resolve()
+    candidate = Path(input_path)
+    if not candidate.is_absolute():
+        candidate = folder / candidate
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(folder)
+        return resolved
+    except Exception:
+        return None
+
+
+async def _handle_upload(
+    dest_dir: Path,
+    allowed_suffixes: set[str],
+    file: UploadFile,
+) -> JSONResponse:
+    filename = Path(file.filename or "").name
+    if not filename:
+        return JSONResponse({"error": "invalid filename"}, status_code=400)
+    suffix = Path(filename).suffix.lower()
+    if suffix not in allowed_suffixes:
+        return JSONResponse({"error": "unsupported file type"}, status_code=400)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    target = dest_dir / filename
+    data = await file.read()
+    with target.open("wb") as handler:
+        handler.write(data)
+    return JSONResponse(
+        {
+            "name": filename,
+            "path": str(target.resolve()),
+            "size": target.stat().st_size,
+        }
+    )
+
+
+def _filter_hallucinated_risks(
+    config: ServerConfig, risks: list[dict]
+) -> list[dict]:
+    cleaned = []
+    for risk in risks:
+        citations = risk.get("law_evidence") or []
+        if not citations:
+            continue
+        all_valid = True
+        for citation in citations:
+            source_path = (citation or {}).get("source_path", "")
+            if not _resolve_citation_path(config, source_path):
+                all_valid = False
+                break
+        if all_valid:
+            cleaned.append(risk)
+    return cleaned
+
+
+def _resolve_citation_path(config: ServerConfig, raw_path: str) -> Path | None:
+    if not raw_path:
+        return None
+    cleaned = _clean_path(raw_path)
+    target = _resolve_in_workspace(config, cleaned)
+    if target and target.exists():
+        return target
+    target = _find_legal_by_name(config, cleaned)
+    if target and target.exists():
+        return target
+    return None
+
+
+def _suggest_reformat_name(filename: str) -> str:
+    name = Path(filename).name
+    if not name:
+        return "reformatted.txt"
+    stem = Path(name).stem
+    if not stem:
+        return "reformatted.txt"
+    return f"{stem}_reformat.txt"
+
+
+async def _read_json_payload(request: Request) -> dict[str, Any] | None:
+    try:
+        return await request.json()
+    except Exception:
         return None
 
 
@@ -302,13 +391,11 @@ def main() -> None:
         static_dir=static_dir,
         contract_upload_dir=upload_dir,
     )
-    handler = lambda *handler_args, **handler_kwargs: LegalWebHandler(
-        *handler_args,
-        config=config,
-        **handler_kwargs,
-    )
-    server = ThreadingHTTPServer((args.host, args.port), handler)
-    server.serve_forever()
+    app = create_app(config)
+
+    import uvicorn
+
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

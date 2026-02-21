@@ -56,21 +56,33 @@ class TestToolsAndAudit(unittest.TestCase):
             contract_max_chars=1000,
         )
         mocked_json = {
-            "overall_risk_score": 35,
             "summary": "存在支付条款风险",
-            "issues": [
+            "overall": {"risk_count": {"high": 0, "medium": 1, "low": 0}},
+            "delta": {"new_risks": [], "changed_risks": [], "closed_risks": [], "clause_changes": []},
+            "risks": [
                 {
-                    "clause_excerpt": "甲方应当在30日内支付服务费。",
-                    "risk_level": "中",
-                    "risk_reason": "支付条款未明确违约责任",
-                    "legal_citations": [
+                    "risk_id": "R-001",
+                    "clause_id": "C-1-1-1",
+                    "title": "付款条款风险",
+                    "level": "中",
+                    "score": 12,
+                    "likelihood": 3,
+                    "impact": 4,
+                    "confidence": "中",
+                    "tags": ["payment"],
+                    "contract_evidence": "甲方应当在30日内支付服务费。",
+                    "law_evidence": [
                         {
                             "source_path": "law.txt",
-                            "article_no": "第一条",
+                            "law_ref_id": "L-1-1-1",
                             "quote": "合同当事人应当遵循公平原则。",
                         }
                     ],
-                    "suggestion": "补充逾期支付违约责任条款。",
+                    "risk_reason": "支付条款未明确违约责任",
+                    "trigger": "付款逾期",
+                    "impact_analysis": "违约责任不明导致索赔困难",
+                    "suggested_text": "补充逾期支付违约责任条款。",
+                    "open_questions": ["是否约定逾期利率"],
                 }
             ],
         }
@@ -93,8 +105,8 @@ class TestToolsAndAudit(unittest.TestCase):
                     ):
                         result = run_audit(contract_text, legal_articles, config)
         data = json.loads(result.raw_json)
-        self.assertEqual(data["overall_risk_score"], 35)
-        self.assertEqual(len(data["issues"]), 1)
+        self.assertEqual(data["summary"], "存在支付条款风险")
+        self.assertEqual(len(data["risks"]), 1)
 
 
 if __name__ == "__main__":
