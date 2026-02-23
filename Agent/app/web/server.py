@@ -13,9 +13,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from Agent.app.audit.engine import run_audit
+from Agent.app.audit.memory_update import update_memory_from_feedback
 from Agent.app.cli import _load_legal_articles
 from Agent.app.config import AppConfig
 from Agent.app.legal.reformat_law import reformat_law_text
+from Agent.app.logging_utils import get_logger, safe_json
 from Agent.app.preprocess.extract_text import extract_text
 from Agent.app.tools.file_read import list_legal_files, read_legal_file
 
@@ -29,6 +31,7 @@ class ServerConfig:
 
 def create_app(config: ServerConfig) -> FastAPI:
     app = FastAPI()
+    logger = get_logger("api")
     if config.static_dir.exists():
         app.mount(
             "/static",
@@ -219,20 +222,57 @@ def create_app(config: ServerConfig) -> FastAPI:
     async def audit_run(request: Request):
         payload = await _read_json_payload(request)
         if payload is None:
+            logger.info("api_status %s", safe_json({"path": "/api/audit/run", "status": "error", "error": "invalid json"}))
             return JSONResponse({"error": "invalid json"}, status_code=400)
         contract = payload.get("contract")
         if not contract:
+            logger.info("api_status %s", safe_json({"path": "/api/audit/run", "status": "error", "error": "contract is required"}))
             return JSONResponse({"error": "contract is required"}, status_code=400)
         target = _resolve_in_contracts(config, contract)
         if not target or not target.exists():
+            logger.info("api_status %s", safe_json({"path": "/api/audit/run", "status": "error", "error": "contract not found"}))
             return JSONResponse({"error": "contract not found"}, status_code=404)
-        app_config = AppConfig.from_env(legal_workspace=config.legal_workspace, model=None)
-        contract_text = extract_text(target)
-        legal_articles = _load_legal_articles(config.legal_workspace, app_config)
-        result = run_audit(contract_text, legal_articles, app_config)
-        output = json.loads(result.raw_json)
-        output["risks"] = _filter_hallucinated_risks(config, output.get("risks", []))
-        return JSONResponse({"result": output})
+        logger.info("audit_request %s", safe_json({"contract": str(target)}))
+        try:
+            app_config = AppConfig.from_env(legal_workspace=config.legal_workspace, model=None)
+            contract_text = extract_text(target)
+            legal_articles = _load_legal_articles(config.legal_workspace, app_config)
+            result = run_audit(contract_text, legal_articles, app_config)
+            output = json.loads(result.raw_json)
+            output["risks"] = _filter_hallucinated_risks(config, output.get("risks", []))
+            logger.info("api_status %s", safe_json({"path": "/api/audit/run", "status": "success"}))
+            return JSONResponse({"result": output})
+        except Exception as exc:
+            logger.error("api_status %s", safe_json({"path": "/api/audit/run", "status": "error", "error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @app.post("/api/audit/feedback")
+    async def audit_feedback(request: Request):
+        payload = await _read_json_payload(request)
+        if payload is None:
+            logger.info("api_status %s", safe_json({"path": "/api/audit/feedback", "status": "error", "error": "invalid json"}))
+            return JSONResponse({"error": "invalid json"}, status_code=400)
+        feedback = payload.get("feedback", "")
+        audit_result = payload.get("audit_result")
+        error = _validate_feedback_payload(feedback, audit_result)
+        if error:
+            logger.info("api_status %s", safe_json({"path": "/api/audit/feedback", "status": "error", "error": error}))
+            return JSONResponse({"error": error}, status_code=400)
+        if isinstance(audit_result, str):
+            audit_result = json.loads(audit_result)
+        logger.info("feedback_request %s", safe_json({"length": len(feedback)}))
+        try:
+            app_config = AppConfig.from_env(legal_workspace=config.legal_workspace, model=None)
+            updated_memory = update_memory_from_feedback(
+                config=app_config,
+                feedback=feedback,
+                audit_result=audit_result,
+            )
+            logger.info("api_status %s", safe_json({"path": "/api/audit/feedback", "status": "success"}))
+            return JSONResponse({"memory": updated_memory, "length": len(updated_memory)})
+        except Exception as exc:
+            logger.error("api_status %s", safe_json({"path": "/api/audit/feedback", "status": "error", "error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=500)
 
     return app
 
@@ -302,6 +342,31 @@ def _resolve_in_contracts(config: ServerConfig, input_path: str) -> Path | None:
         return None
 
 
+def _validate_feedback_payload(feedback: Any, audit_result: Any) -> str | None:
+    if not isinstance(feedback, str):
+        return "feedback must be string"
+    feedback_text = feedback.strip()
+    if not feedback_text:
+        return "feedback is required"
+    if len(feedback_text) < 10:
+        return "feedback is too short"
+    if len(feedback_text) > 2000:
+        return "feedback is too long"
+    if audit_result is None:
+        return "audit_result is required"
+    audit_value = audit_result
+    if isinstance(audit_value, str):
+        try:
+            audit_value = json.loads(audit_value)
+        except json.JSONDecodeError:
+            return "audit_result must be json"
+    if not isinstance(audit_value, dict):
+        return "audit_result must be object"
+    if len(json.dumps(audit_value, ensure_ascii=False)) > 20000:
+        return "audit_result is too large"
+    return None
+
+
 async def _handle_upload(
     dest_dir: Path,
     allowed_suffixes: set[str],
@@ -367,6 +432,8 @@ def _suggest_reformat_name(filename: str) -> str:
     if not stem:
         return "reformatted.txt"
     return f"{stem}_reformat.txt"
+
+
 
 
 async def _read_json_payload(request: Request) -> dict[str, Any] | None:

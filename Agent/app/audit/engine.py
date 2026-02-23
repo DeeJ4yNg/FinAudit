@@ -1,9 +1,18 @@
 import json
+import re
 
 from Agent.app.config import AppConfig
 from Agent.app.legal.retrieval import retrieve_top_articles
 from Agent.app.llm.openai_client import chat_complete, create_openai_client, ensure_json
-from Agent.app.audit.prompt import build_system_prompt, build_user_prompt
+from Agent.app.audit.prompt import (
+    build_chunk_user_prompt,
+    build_summary_prompt,
+    build_system_prompt,
+    build_system_prompt_base,
+    build_user_prompt,
+    load_memory,
+)
+from Agent.app.logging_utils import get_logger, safe_json
 from typing import List
 
 from Agent.app.models import AuditResult, LegalArticle
@@ -16,6 +25,14 @@ def run_audit(
 ) -> AuditResult:
     if not contract_text.strip():
         raise ValueError("Contract text is empty")
+    logger = get_logger("audit")
+    mode_label = _law_retrieval_label(config.law_retrieval)
+    logger.info(
+        "audit_mode %s",
+        safe_json({"mode": config.law_retrieval, "label": mode_label}),
+    )
+    if config.law_retrieval == 3:
+        return _run_chunked_audit(contract_text, legal_articles, config)
     selected_articles = retrieve_top_articles(
         contract_text,
         legal_articles,
@@ -25,7 +42,7 @@ def run_audit(
     legal_context = _format_legal_context(selected_articles)
     system_prompt = build_system_prompt()
     user_prompt = build_user_prompt(
-        _truncate(contract_text, config.contract_max_chars),
+        contract_text,
         legal_context,
     )
     client = create_openai_client(
@@ -43,6 +60,69 @@ def run_audit(
     return AuditResult(raw_json=json_text)
 
 
+def _run_chunked_audit(
+    contract_text: str,
+    legal_articles: List[LegalArticle],
+    config: AppConfig,
+) -> AuditResult:
+    chunks = _chunk_contract_text(contract_text, config.contract_max_chars)
+    if not chunks:
+        raise ValueError("Contract text is empty")
+    logger = get_logger("audit.chunked")
+    system_prompt = build_system_prompt_base()
+    memory = load_memory()
+    client = create_openai_client(
+        api_key=config.openai_api_key,
+        base_url=config.openai_base_url,
+    )
+    results: list[str] = []
+    total = len(chunks)
+    for index, chunk in enumerate(chunks, start=1):
+        logger.info(
+            "chunk_start %s",
+            safe_json({"index": index, "total": total, "chars": len(chunk)}),
+        )
+        selected_articles = retrieve_top_articles(
+            chunk,
+            legal_articles,
+            config.max_articles,
+            config,
+        )
+        legal_context = _format_legal_context(selected_articles)
+        previous_results = "\n\n".join(results)
+        user_prompt = build_chunk_user_prompt(
+            contract_text=chunk,
+            legal_context=legal_context,
+            memory=memory,
+            previous_results=previous_results,
+            chunk_index=index,
+            chunk_total=total,
+        )
+        response_text = chat_complete(
+            client=client,
+            model=config.model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+        json_text = ensure_json(response_text)
+        _validate_json(json_text)
+        results.append(json_text)
+        logger.info(
+            "chunk_done %s",
+            safe_json({"index": index, "total": total}),
+        )
+    summary_prompt = build_summary_prompt(results, memory)
+    summary_text = chat_complete(
+        client=client,
+        model=config.model,
+        system_prompt=system_prompt,
+        user_prompt=summary_prompt,
+    )
+    summary_json = ensure_json(summary_text)
+    _validate_json(summary_json)
+    return AuditResult(raw_json=summary_json)
+
+
 def _format_legal_context(articles: list[LegalArticle]) -> str:
     blocks = []
     for article in articles:
@@ -58,6 +138,63 @@ def _truncate(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars]
+
+
+def _chunk_contract_text(text: str, max_chars: int) -> list[str]:
+    cleaned = text.strip()
+    if not cleaned:
+        return []
+    if max_chars <= 0:
+        return [cleaned]
+    if len(cleaned) <= max_chars:
+        return [cleaned]
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", cleaned) if part.strip()]
+    if not paragraphs:
+        return _split_long_text(cleaned, max_chars)
+    chunks: list[str] = []
+    current = ""
+    for paragraph in paragraphs:
+        if len(paragraph) > max_chars:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(_split_long_text(paragraph, max_chars))
+            continue
+        if not current:
+            current = paragraph
+            continue
+        combined = f"{current}\n\n{paragraph}"
+        if len(combined) <= max_chars:
+            current = combined
+        else:
+            chunks.append(current)
+            current = paragraph
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _split_long_text(text: str, max_chars: int) -> list[str]:
+    if max_chars <= 0:
+        return [text]
+    pieces = []
+    start = 0
+    total = len(text)
+    while start < total:
+        end = min(start + max_chars, total)
+        pieces.append(text[start:end])
+        start = end
+    return pieces
+
+
+def _law_retrieval_label(mode: int) -> str:
+    if mode == 1:
+        return "full_contract_full_laws"
+    if mode == 2:
+        return "full_contract_retrieved_laws"
+    if mode == 3:
+        return "chunked_contract_retrieved_laws"
+    return "unknown"
 
 
 def _validate_json(json_text: str) -> None:

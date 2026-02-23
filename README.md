@@ -68,12 +68,16 @@ $env:OPENAI_BASE_URL="https://api.openai.com/v1"
 $env:OPENAI_EMBEDDING_MODEL="text-embedding-3-small"
 $env:OPENAI_API_KEY_EMBEDDING="your-embedding-api-key"
 $env:OPENAI_API_BASE_EMBEDDING="https://api.openai.com/v1"
-$env:USE_FULL_ARTICAL="false"
+$env:LAW_RETRIEVAL="2"
 ```
 
 Only `OPENAI_API_KEY` is required. `OPENAI_MODEL` and `OPENAI_BASE_URL` are optional.
 `OPENAI_API_KEY_EMBEDDING` and `OPENAI_API_BASE_EMBEDDING` default to the main API key/base URL if not set.
-Set `USE_FULL_ARTICAL=true` to disable retrieval and pass all legal articles to the prompt.
+Set `LAW_RETRIEVAL` to control how contract text and legal articles are attached:
+
+- `1`: full contract + full laws (no retrieval)
+- `2`: full contract + retrieved top-k laws
+- `3`: chunked contract + retrieved top-k laws, then summarize
 
 ## Run the audit
 

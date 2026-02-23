@@ -1,5 +1,7 @@
 from typing import Any, Optional
 
+from Agent.app.logging_utils import get_logger, is_llm_content_logging_enabled, safe_json
+
 
 def create_openai_client(api_key: str, base_url: Optional[str]):
     from openai import OpenAI
@@ -21,19 +23,35 @@ def chat_complete(
     user_prompt: str,
     temperature: float = 0,
 ) -> str:
-    response = client.chat.completions.create(
-        model=model,
-        temperature=temperature,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-    message = response.choices[0].message
-    content = message.content if message else None
-    if not content:
-        raise ValueError("OpenAI response was empty")
-    return content
+    logger = get_logger("llm.chat")
+    payload = {
+        "model": model,
+        "temperature": temperature,
+    }
+    if is_llm_content_logging_enabled():
+        payload["system_prompt"] = system_prompt
+        payload["user_prompt"] = user_prompt
+    logger.info("llm_request %s", safe_json(payload))
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=temperature,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        message = response.choices[0].message
+        content = message.content if message else None
+        if not content:
+            raise ValueError("OpenAI response was empty")
+        if is_llm_content_logging_enabled():
+            logger.info("llm_response %s", safe_json({"content": content}))
+        logger.info("llm_status %s", safe_json({"status": "success"}))
+        return content
+    except Exception as exc:
+        logger.error("llm_status %s", safe_json({"status": "error", "error": str(exc)}))
+        raise
 
 
 def ensure_json(text: str) -> str:
@@ -48,14 +66,24 @@ def ensure_json(text: str) -> str:
 
 
 def embed_texts(client, model: str, texts: list[str]) -> list[list[float]]:
-    response = client.embeddings.create(
-        model=model,
-        input=texts,
-    )
-    embeddings = []
-    for item in response.data:
-        embeddings.append(item.embedding)
-    return embeddings
+    logger = get_logger("llm.embed")
+    payload = {"model": model, "count": len(texts)}
+    if is_llm_content_logging_enabled():
+        payload["texts"] = texts
+    logger.info("embedding_request %s", safe_json(payload))
+    try:
+        response = client.embeddings.create(
+            model=model,
+            input=texts,
+        )
+        embeddings = []
+        for item in response.data:
+            embeddings.append(item.embedding)
+        logger.info("embedding_status %s", safe_json({"status": "success", "count": len(embeddings)}))
+        return embeddings
+    except Exception as exc:
+        logger.error("embedding_status %s", safe_json({"status": "error", "error": str(exc)}))
+        raise
 
 
 def _ensure_ascii_header(value: str, name: str) -> None:

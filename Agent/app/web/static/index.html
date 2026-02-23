@@ -200,6 +200,24 @@
         white-space: pre-wrap;
         font-size: 12px;
       }
+      .feedback-panel {
+        margin-top: 16px;
+        background: #f8fafc;
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid #e2e8f0;
+      }
+      .feedback-input {
+        width: 100%;
+        min-height: 120px;
+        margin-top: 8px;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        font-size: 13px;
+        resize: vertical;
+        box-sizing: border-box;
+      }
     </style>
   </head>
   <body>
@@ -270,10 +288,21 @@
           <div id="citationContent" class="citation-content"></div>
         </div>
         <div id="resultJson" class="json-view"></div>
+        <div id="feedbackPanel" class="feedback-panel" style="display: none">
+          <div style="font-weight: 600">反馈</div>
+          <textarea id="feedbackInput" class="feedback-input" maxlength="2000" placeholder="请输入你的反馈与建议"></textarea>
+          <div id="feedbackCounter" class="status"></div>
+          <div class="actions">
+            <button id="feedbackSubmit" class="button" onclick="submitFeedback()">提交反馈</button>
+          </div>
+          <div id="feedbackStatus" class="status"></div>
+        </div>
       </div>
     </div>
     <script>
       let reformatCache = null;
+      let latestAuditResult = null;
+      let feedbackSubmitted = false;
 
       async function uploadContract() {
         const fileInput = document.getElementById("contractFile");
@@ -562,6 +591,10 @@
         const summary = document.getElementById("resultSummary");
         const issues = document.getElementById("resultIssues");
         const jsonView = document.getElementById("resultJson");
+        const feedbackPanel = document.getElementById("feedbackPanel");
+        const feedbackStatus = document.getElementById("feedbackStatus");
+        const feedbackInput = document.getElementById("feedbackInput");
+        const feedbackCounter = document.getElementById("feedbackCounter");
         const citationPanel = document.getElementById("citationPanel");
         const citationTitle = document.getElementById("citationTitle");
         const citationContent = document.getElementById("citationContent");
@@ -641,9 +674,94 @@
           issues.appendChild(card);
         }
         jsonView.textContent = JSON.stringify(result, null, 2);
+        latestAuditResult = result;
+        feedbackSubmitted = false;
+        feedbackPanel.style.display = "block";
+        feedbackStatus.textContent = "";
+        feedbackInput.value = "";
+        feedbackInput.disabled = false;
+        feedbackCounter.textContent = "至少输入 10 字，最多 2000 字";
+        updateFeedbackState();
         resultBox.style.display = "block";
         resultBox.scrollIntoView({ behavior: "smooth" });
       }
+
+      function updateFeedbackState() {
+        const input = document.getElementById("feedbackInput");
+        const counter = document.getElementById("feedbackCounter");
+        const button = document.getElementById("feedbackSubmit");
+        const value = (input.value || "").trim();
+        const length = value.length;
+        if (feedbackSubmitted) {
+          counter.textContent = "已提交反馈，需要重新审计后才能再次提交";
+          button.disabled = true;
+          input.disabled = true;
+          return;
+        }
+        counter.textContent = `已输入 ${length} 字，至少 10 字，最多 2000 字`;
+        button.disabled = length < 10 || length > 2000;
+        input.disabled = false;
+      }
+
+      async function submitFeedback() {
+        const input = document.getElementById("feedbackInput");
+        const status = document.getElementById("feedbackStatus");
+        const button = document.getElementById("feedbackSubmit");
+        const feedback = (input.value || "").trim();
+        if (feedbackSubmitted) {
+          status.textContent = "已提交反馈，需要重新审计后才能再次提交";
+          return;
+        }
+        if (!latestAuditResult) {
+          status.textContent = "请先完成审计";
+          return;
+        }
+        if (!feedback) {
+          status.textContent = "请输入反馈";
+          return;
+        }
+        if (feedback.length < 10) {
+          status.textContent = "反馈内容太短";
+          return;
+        }
+        if (feedback.length > 2000) {
+          status.textContent = "反馈内容过长";
+          return;
+        }
+        status.textContent = "提交中...";
+        button.disabled = true;
+        try {
+          const response = await fetch("/api/audit/feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              feedback,
+              audit_result: latestAuditResult,
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            status.textContent = data.error || "提交失败";
+            return;
+          }
+          feedbackSubmitted = true;
+          status.textContent = "已提交";
+          input.value = "";
+          updateFeedbackState();
+        } catch (error) {
+          status.textContent = "提交失败";
+        } finally {
+          if (!feedbackSubmitted) {
+            button.disabled = false;
+          }
+        }
+      }
+
+      document.addEventListener("input", (event) => {
+        if (event.target && event.target.id === "feedbackInput") {
+          updateFeedbackState();
+        }
+      });
 
       function escapeHtml(text) {
         return text
