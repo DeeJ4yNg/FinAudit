@@ -76,11 +76,44 @@ def ensure_json(text: str) -> str:
     text = text.strip()
     if text.startswith("{") and text.endswith("}"):
         return text
+    extracted = _extract_json_object(text)
+    if extracted:
+        return extracted
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:
         return text[start : end + 1]
     raise ValueError("No JSON object found in response")
+
+
+def _extract_json_object(text: str) -> str | None:
+    start = None
+    depth = 0
+    in_string = False
+    escape = False
+    for index, char in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if char == "\\" and in_string:
+            escape = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "{":
+            if start is None:
+                start = index
+            depth += 1
+            continue
+        if char == "}":
+            if depth > 0:
+                depth -= 1
+            if depth == 0 and start is not None:
+                return text[start : index + 1]
+    return None
 
 
 def embed_texts(client, model: str, texts: list[str]) -> list[list[float]]:

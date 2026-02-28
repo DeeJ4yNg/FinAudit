@@ -66,13 +66,20 @@ class AppConfig:
                 memory_len = max(200, int(memory_len_raw))
             except ValueError:
                 memory_len = 1200
+        contract_max_chars_raw = os.getenv("CONTRACT_MAX_CHARS", "").strip()
+        contract_max_chars = 20000
+        if contract_max_chars_raw:
+            try:
+                contract_max_chars = max(200, int(contract_max_chars_raw))
+            except ValueError:
+                contract_max_chars = 20000
         return AppConfig(
             openai_api_key=api_key,
             openai_base_url=base_url,
             model=selected_model,
             legal_workspace=legal_workspace,
             max_articles=20,
-            contract_max_chars=20000,
+            contract_max_chars=contract_max_chars,
             memory_len=memory_len,
             embedding_api_key=embedding_api_key,
             embedding_base=embedding_base_url,

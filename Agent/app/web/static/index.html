@@ -129,6 +129,50 @@
         margin-top: 12px;
         font-size: 14px;
       }
+      .section-block {
+        margin-top: 16px;
+      }
+      .section-title {
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .chunk-list {
+        display: grid;
+        gap: 12px;
+      }
+      .chunk-card {
+        background: #f8fafc;
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid #e2e8f0;
+      }
+      .chunk-card h3 {
+        margin: 0 0 6px;
+        font-size: 14px;
+      }
+      .chunk-risk {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid #e2e8f0;
+      }
+      .chunk-risk h4 {
+        margin: 0 0 6px;
+        font-size: 14px;
+      }
+      .chunk-details summary {
+        cursor: pointer;
+        font-weight: 600;
+        margin-top: 8px;
+      }
+      .chunk-content {
+        margin-top: 8px;
+        background: #0b1120;
+        color: #e2e8f0;
+        border-radius: 8px;
+        padding: 10px;
+        white-space: pre-wrap;
+        font-size: 12px;
+      }
       .issues {
         margin-top: 16px;
         display: grid;
@@ -281,7 +325,14 @@
       <div class="result" id="auditResult" style="display: none">
         <h2>审计结果</h2>
         <div id="resultScore" class="score"></div>
-        <div id="resultSummary" class="summary"></div>
+        <div id="chunkResultPanel" class="section-block" style="display: none">
+          <div class="section-title">分块审阅结果</div>
+          <div id="chunkResultList" class="chunk-list"></div>
+        </div>
+        <div id="finalSummaryPanel" class="section-block">
+          <div class="section-title">最终总结</div>
+          <div id="resultSummary" class="summary"></div>
+        </div>
         <div id="tokenUsagePanel" style="margin-top: 16px">
           <div style="font-weight: 600">Token 用量</div>
           <table>
@@ -612,6 +663,8 @@
         const citationPanel = document.getElementById("citationPanel");
         const citationTitle = document.getElementById("citationTitle");
         const citationContent = document.getElementById("citationContent");
+        const chunkPanel = document.getElementById("chunkResultPanel");
+        const chunkList = document.getElementById("chunkResultList");
         const counts = (result.overall || {}).risk_count || {};
         let highCount = counts.high ?? 0;
         let mediumCount = counts.medium ?? 0;
@@ -629,6 +682,96 @@
         }
         score.textContent = `风险数量：高${highCount} 中${mediumCount} 低${lowCount}`;
         summary.textContent = result.summary || "";
+        chunkList.innerHTML = "";
+        const chunkResults = Array.isArray(result.chunk_results) ? result.chunk_results : [];
+        if (chunkResults.length) {
+          chunkPanel.style.display = "block";
+          for (let i = 0; i < chunkResults.length; i += 1) {
+            const chunk = chunkResults[i] || {};
+            const card = document.createElement("div");
+            card.className = "chunk-card";
+            const title = document.createElement("h3");
+            const index = chunk.chunk_index ?? i + 1;
+            const total = chunk.chunk_total ?? chunkResults.length;
+            title.textContent = `第 ${index}/${total} 块`;
+            const chunkSummary = document.createElement("div");
+            chunkSummary.textContent = `结论：${chunk.summary || ""}`;
+            card.appendChild(title);
+            card.appendChild(chunkSummary);
+            const chunkText = chunk.chunk_text || "";
+            if (chunkText) {
+              const details = document.createElement("details");
+              details.className = "chunk-details";
+              const summary = document.createElement("summary");
+              summary.textContent = "合同分块内容";
+              const content = document.createElement("div");
+              content.className = "chunk-content";
+              content.textContent = chunkText;
+              details.appendChild(summary);
+              details.appendChild(content);
+              card.appendChild(details);
+            }
+            const risks = Array.isArray(chunk.risks) ? chunk.risks : [];
+            if (!risks.length) {
+              const empty = document.createElement("div");
+              empty.textContent = "无风险项";
+              card.appendChild(empty);
+            } else {
+              for (const risk of risks) {
+                const riskBlock = document.createElement("div");
+                riskBlock.className = "chunk-risk";
+                const riskTitle = document.createElement("h4");
+                const level = risk.level || "";
+                riskTitle.textContent = `${risk.title || risk.clause_id || "风险"}${level}`;
+                const reason = document.createElement("div");
+                reason.textContent = `风险说明：${risk.risk_reason || ""}`;
+                const meta = document.createElement("div");
+                meta.textContent = `分值：${risk.score ?? "-"} 置信度：${risk.confidence || ""}`;
+                const evidence = document.createElement("div");
+                evidence.textContent = `合同证据：${risk.contract_evidence || ""}`;
+                const trigger = document.createElement("div");
+                trigger.textContent = `触发条件：${risk.trigger || ""}`;
+                const impact = document.createElement("div");
+                impact.textContent = `影响分析：${risk.impact_analysis || ""}`;
+                const suggestion = document.createElement("div");
+                suggestion.textContent = `替换建议：${risk.suggested_text || ""}`;
+                const citationsWrap = document.createElement("div");
+                citationsWrap.style.marginTop = "6px";
+                citationsWrap.style.display = "grid";
+                citationsWrap.style.gap = "6px";
+                const lawEvidence = Array.isArray(risk.law_evidence) ? risk.law_evidence : [];
+                for (const item of lawEvidence) {
+                  const row = document.createElement("div");
+                  const link = document.createElement("a");
+                  link.className = "link-button";
+                  link.textContent = `[${item.source_path}] ${item.law_ref_id || ""}`.trim();
+                  link.href = "javascript:void(0)";
+                  link.addEventListener("click", () =>
+                    openCitation(item.source_path || "", item.quote || "")
+                  );
+                  const quote = document.createElement("div");
+                  quote.style.whiteSpace = "pre-wrap";
+                  quote.textContent = item.quote || "";
+                  row.appendChild(link);
+                  row.appendChild(quote);
+                  citationsWrap.appendChild(row);
+                }
+                riskBlock.appendChild(riskTitle);
+                riskBlock.appendChild(reason);
+                riskBlock.appendChild(meta);
+                riskBlock.appendChild(evidence);
+                riskBlock.appendChild(trigger);
+                riskBlock.appendChild(impact);
+                riskBlock.appendChild(suggestion);
+                riskBlock.appendChild(citationsWrap);
+                card.appendChild(riskBlock);
+              }
+            }
+            chunkList.appendChild(card);
+          }
+        } else {
+          chunkPanel.style.display = "none";
+        }
         tokenUsageTable.innerHTML = "";
         const usage = tokenUsage || {};
         const cached = usage.prompt_cached ?? null;
@@ -704,7 +847,11 @@
           issues.appendChild(card);
         }
         jsonView.textContent = JSON.stringify(result, null, 2);
-        latestAuditResult = result;
+        const feedbackResult = { ...result };
+        if (feedbackResult.chunk_results) {
+          delete feedbackResult.chunk_results;
+        }
+        latestAuditResult = feedbackResult;
         feedbackSubmitted = false;
         feedbackPanel.style.display = "block";
         feedbackStatus.textContent = "";

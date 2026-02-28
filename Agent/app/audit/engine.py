@@ -80,6 +80,7 @@ def _run_chunked_audit(
         base_url=config.openai_base_url,
     )
     results: list[str] = []
+    chunk_results: list[dict] = []
     total_usage = _empty_token_usage()
     total = len(chunks)
     for index, chunk in enumerate(chunks, start=1):
@@ -112,6 +113,11 @@ def _run_chunked_audit(
         json_text = ensure_json(response_text)
         json_text = _normalize_json(json_text)
         results.append(json_text)
+        chunk_data = json.loads(json_text)
+        chunk_data["chunk_index"] = index
+        chunk_data["chunk_total"] = total
+        chunk_data["chunk_text"] = chunk
+        chunk_results.append(chunk_data)
         _merge_token_usage(total_usage, usage)
         logger.info(
             "chunk_done %s",
@@ -126,6 +132,9 @@ def _run_chunked_audit(
     )
     summary_json = ensure_json(summary_text)
     summary_json = _normalize_json(summary_json)
+    summary_data = json.loads(summary_json)
+    summary_data["chunk_results"] = chunk_results
+    summary_json = json.dumps(summary_data, ensure_ascii=False)
     _merge_token_usage(total_usage, summary_usage)
     return AuditResult(raw_json=summary_json, token_usage=total_usage)
 
@@ -205,12 +214,48 @@ def _law_retrieval_label(mode: int) -> str:
 
 
 def _normalize_json(json_text: str) -> str:
-    data = json.loads(json_text)
-    if "summary" not in data:
-        raise ValueError("Missing summary")
+    data = _safe_load_json(json_text)
+    if not isinstance(data, dict):
+        data = {}
+    summary = data.get("summary")
+    if not isinstance(summary, str):
+        data["summary"] = _extract_summary(json_text)
     if "risks" not in data or not isinstance(data.get("risks"), list):
         data["risks"] = []
+    if "raw_text" not in data and not data.get("summary"):
+        data["raw_text"] = json_text
     return json.dumps(data, ensure_ascii=False)
+
+
+def _safe_load_json(text: str) -> dict | list | None:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        repaired = _repair_json_text(text)
+        if repaired and repaired != text:
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                return None
+        return None
+
+
+def _repair_json_text(text: str) -> str:
+    cleaned = text.replace("\ufeff", "")
+    cleaned = cleaned.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", cleaned)
+    return cleaned
+
+
+def _extract_summary(text: str) -> str:
+    match = re.search(r'"summary"\s*:\s*"([^"]*)"', text)
+    if match:
+        return match.group(1)
+    match = re.search(r"summary\s*[:：]\s*([^\n\r]+)", text, re.IGNORECASE)
+    if match:
+        return match.group(1).strip().strip('"')
+    return ""
 
 
 def _empty_token_usage() -> dict[str, int]:

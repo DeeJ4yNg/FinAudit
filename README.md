@@ -79,6 +79,50 @@ Set `LAW_RETRIEVAL` to control how contract text and legal articles are attached
 - `2`: full contract + retrieved top-k laws
 - `3`: chunked contract + retrieved top-k laws, then summarize
 
+## .env Construction
+
+Place `.env` at the project root. Use `KEY="VALUE"` per line. The app loads it on startup (existing system environment variables take precedence).
+
+Minimal configuration:
+
+```
+OPENAI_API_KEY="your-api-key"
+LAW_RETRIEVAL="3"
+```
+
+Common full configuration:
+
+```
+OPENAI_API_KEY="your-api-key"
+OPENAI_MODEL="gpt-4.1-mini"
+OPENAI_BASE_URL="https://api.openai.com/v1"
+
+OPENAI_EMBEDDING_MODEL="text-embedding-3-small"
+OPENAI_API_KEY_EMBEDDING="your-embedding-api-key"
+OPENAI_API_BASE_EMBEDDING="https://api.openai.com/v1"
+
+LAW_RETRIEVAL="3"
+CONTRACT_MAX_CHARS="2000"
+MEMORY_LEN="1200"
+```
+
+Field descriptions:
+
+- `OPENAI_API_KEY`: primary model API key, required
+- `OPENAI_MODEL`: primary model name, default gpt-4.1-mini
+- `OPENAI_BASE_URL`: primary model base URL, optional
+- `OPENAI_EMBEDDING_MODEL`: embedding model name, default text-embedding-3-small
+- `OPENAI_API_KEY_EMBEDDING`: embedding API key, defaults to `OPENAI_API_KEY`
+- `OPENAI_API_BASE_EMBEDDING`: embedding base URL, defaults to `OPENAI_BASE_URL`
+- `LAW_RETRIEVAL`: retrieval mode (1/2/3), recommended 3
+- `CONTRACT_MAX_CHARS`: max contract chunk size, minimum 200, default 20000
+- `MEMORY_LEN`: feedback memory length cap, minimum 200, default 1200
+
+Notes:
+
+- When `LAW_RETRIEVAL` is set, it overrides `USE_FULL_ARTICAL`
+- Never commit real secrets in `.env`
+
 ## Run the audit
 
 Provide a contract file and a legal workspace directory that contains law documents:
@@ -124,6 +168,35 @@ python -m Agent.app.web.server --legal-workspace /path/to/legal --host 0.0.0.0 -
 
 Run behind a reverse proxy or a process manager as needed.
 
+## Deployment Steps
+
+1. Prepare runtime and dependencies
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+2. Prepare the legal workspace directory (.txt/.md/.pdf/.docx)
+
+```
+mkdir -p /data/legal
+```
+
+3. Configure `.env` and set parameters like `LAW_RETRIEVAL` and `CONTRACT_MAX_CHARS`
+
+4. Start the service (use 0.0.0.0 for public binding)
+
+```
+python -m Agent.app.web.server --legal-workspace /data/legal --host 0.0.0.0 --port 8000
+```
+
+5. Run behind a reverse proxy or process manager (optional)
+
+- Use Nginx/Apache for HTTPS and rate limiting
+- Use systemd/supervisor/pm2 for process supervision
+
 ## Legal workspace rules
 
 The `legal-workspace` directory is the only location the agent can read legal rules from. Supported formats:
@@ -140,20 +213,20 @@ The audit output is JSON with risk score, summary, issues, and legal citations:
 ```json
 {
   "overall_risk_score": 0,
-  "summary": "一句话总结",
+  "summary": "one-line summary",
   "issues": [
     {
-      "clause_excerpt": "合同原文摘录",
-      "risk_level": "高/中/低",
-      "risk_reason": "风险原因",
+      "clause_excerpt": "contract excerpt",
+      "risk_level": "high/medium/low",
+      "risk_reason": "risk rationale",
       "legal_citations": [
         {
-          "source_path": "法律文件路径",
-          "article_no": "第X条",
-          "quote": "引用条文原文"
+          "source_path": "legal file path",
+          "article_no": "Article X",
+          "quote": "quoted text"
         }
       ],
-      "suggestion": "修订建议"
+      "suggestion": "revision suggestion"
     }
   ]
 }
