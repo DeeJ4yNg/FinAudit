@@ -282,6 +282,18 @@
         <h2>审计结果</h2>
         <div id="resultScore" class="score"></div>
         <div id="resultSummary" class="summary"></div>
+        <div id="tokenUsagePanel" style="margin-top: 16px">
+          <div style="font-weight: 600">Token 用量</div>
+          <table>
+            <thead>
+              <tr>
+                <th>指标</th>
+                <th>数量</th>
+              </tr>
+            </thead>
+            <tbody id="tokenUsageTable"></tbody>
+          </table>
+        </div>
         <div id="resultIssues" class="issues"></div>
         <div id="citationPanel" class="citation-panel" style="display: none">
           <div id="citationTitle" class="citation-title"></div>
@@ -527,12 +539,13 @@
           }
           status.textContent = "审计完成";
           const result = data.result ?? data;
+          const tokenUsage = data.token_usage ?? null;
           if (!result) {
             status.textContent = "审计失败：空结果";
             return;
           }
           try {
-            renderAuditResult(result);
+            renderAuditResult(result, tokenUsage);
           } catch (error) {
             status.textContent = "审计结果渲染失败";
           }
@@ -584,13 +597,14 @@
         return { ...result, risks };
       }
 
-      function renderAuditResult(raw) {
+      function renderAuditResult(raw, tokenUsage) {
         const result = normalizeAuditResult(raw);
         const resultBox = document.getElementById("auditResult");
         const score = document.getElementById("resultScore");
         const summary = document.getElementById("resultSummary");
         const issues = document.getElementById("resultIssues");
         const jsonView = document.getElementById("resultJson");
+        const tokenUsageTable = document.getElementById("tokenUsageTable");
         const feedbackPanel = document.getElementById("feedbackPanel");
         const feedbackStatus = document.getElementById("feedbackStatus");
         const feedbackInput = document.getElementById("feedbackInput");
@@ -615,6 +629,22 @@
         }
         score.textContent = `风险数量：高${highCount} 中${mediumCount} 低${lowCount}`;
         summary.textContent = result.summary || "";
+        tokenUsageTable.innerHTML = "";
+        const usage = tokenUsage || {};
+        const cached = usage.prompt_cached ?? null;
+        const uncached = usage.prompt_uncached ?? null;
+        const completion = usage.completion ?? null;
+        const rows = [
+          { label: "输入 token（缓存命中）", value: cached },
+          { label: "输入 token（未缓存）", value: uncached },
+          { label: "输出 token", value: completion },
+        ];
+        for (const row of rows) {
+          const item = document.createElement("tr");
+          const value = row.value === null || row.value === undefined ? "-" : row.value;
+          item.innerHTML = `<td>${row.label}</td><td>${value}</td>`;
+          tokenUsageTable.appendChild(item);
+        }
         issues.innerHTML = "";
         citationPanel.style.display = "none";
         citationTitle.textContent = "";

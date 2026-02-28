@@ -23,6 +23,23 @@ def chat_complete(
     user_prompt: str,
     temperature: float = 0,
 ) -> str:
+    content, _ = chat_complete_with_usage(
+        client=client,
+        model=model,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=temperature,
+    )
+    return content
+
+
+def chat_complete_with_usage(
+    client,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0,
+) -> tuple[str, dict[str, int]]:
     logger = get_logger("llm.chat")
     payload = {
         "model": model,
@@ -48,7 +65,8 @@ def chat_complete(
         if is_llm_content_logging_enabled():
             logger.info("llm_response %s", safe_json({"content": content}))
         logger.info("llm_status %s", safe_json({"status": "success"}))
-        return content
+        usage = _extract_usage(response)
+        return content, usage
     except Exception as exc:
         logger.error("llm_status %s", safe_json({"status": "error", "error": str(exc)}))
         raise
@@ -93,3 +111,24 @@ def _ensure_ascii_header(value: str, name: str) -> None:
         raise ValueError(
             f"{name} must be ASCII. Remove non-ASCII characters from the value."
         ) from exc
+
+
+def _extract_usage(response) -> dict[str, int]:
+    usage = getattr(response, "usage", None)
+    if not usage:
+        return {"prompt_total": 0, "prompt_cached": 0, "prompt_uncached": 0, "completion": 0}
+    prompt_total = int(getattr(usage, "prompt_tokens", 0) or 0)
+    completion = int(getattr(usage, "completion_tokens", 0) or 0)
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = 0
+    if isinstance(details, dict):
+        cached = int(details.get("cached_tokens", 0) or 0)
+    else:
+        cached = int(getattr(details, "cached_tokens", 0) or 0)
+    prompt_uncached = max(prompt_total - cached, 0)
+    return {
+        "prompt_total": prompt_total,
+        "prompt_cached": cached,
+        "prompt_uncached": prompt_uncached,
+        "completion": completion,
+    }

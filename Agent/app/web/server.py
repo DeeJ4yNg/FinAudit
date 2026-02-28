@@ -241,7 +241,7 @@ def create_app(config: ServerConfig) -> FastAPI:
             output = json.loads(result.raw_json)
             output["risks"] = _filter_hallucinated_risks(config, output.get("risks", []))
             logger.info("api_status %s", safe_json({"path": "/api/audit/run", "status": "success"}))
-            return JSONResponse({"result": output})
+            return JSONResponse({"result": output, "token_usage": result.token_usage or {}})
         except Exception as exc:
             logger.error("api_status %s", safe_json({"path": "/api/audit/run", "status": "error", "error": str(exc)}))
             return JSONResponse({"error": str(exc)}, status_code=500)

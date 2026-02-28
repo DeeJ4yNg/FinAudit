@@ -96,7 +96,10 @@ class TestToolsAndAudit(unittest.TestCase):
                     embeddings.append([0.0, 1.0])
             return embeddings
 
-        with patch("Agent.app.audit.engine.chat_complete", return_value=json.dumps(mocked_json)):
+        with patch(
+            "Agent.app.audit.engine.chat_complete_with_usage",
+            return_value=(json.dumps(mocked_json), {"prompt_total": 0, "prompt_cached": 0, "prompt_uncached": 0, "completion": 0}),
+        ):
             with patch("Agent.app.audit.engine.create_openai_client", return_value=object()):
                 with patch("Agent.app.legal.retrieval.create_openai_client", return_value=object()):
                     with patch(
@@ -212,11 +215,11 @@ class TestToolsAndAudit(unittest.TestCase):
             return embeddings
 
         with patch(
-            "Agent.app.audit.engine.chat_complete",
+            "Agent.app.audit.engine.chat_complete_with_usage",
             side_effect=[
-                json.dumps(chunk1_json),
-                json.dumps(chunk2_json),
-                json.dumps(summary_json),
+                (json.dumps(chunk1_json), {"prompt_total": 0, "prompt_cached": 0, "prompt_uncached": 0, "completion": 0}),
+                (json.dumps(chunk2_json), {"prompt_total": 0, "prompt_cached": 0, "prompt_uncached": 0, "completion": 0}),
+                (json.dumps(summary_json), {"prompt_total": 0, "prompt_cached": 0, "prompt_uncached": 0, "completion": 0}),
             ],
         ):
             with patch("Agent.app.audit.engine.create_openai_client", return_value=object()):
@@ -291,9 +294,9 @@ class TestToolsAndAudit(unittest.TestCase):
 
         def fake_chat_complete(client, model, system_prompt, user_prompt, temperature=0):
             captured_prompt["user_prompt"] = user_prompt
-            return json.dumps(mocked_json)
+            return json.dumps(mocked_json), {"prompt_total": 0, "prompt_cached": 0, "prompt_uncached": 0, "completion": 0}
 
-        with patch("Agent.app.audit.engine.chat_complete", side_effect=fake_chat_complete):
+        with patch("Agent.app.audit.engine.chat_complete_with_usage", side_effect=fake_chat_complete):
             with patch("Agent.app.audit.engine.create_openai_client", return_value=object()):
                 result = run_audit(contract_text, legal_articles, config)
         data = json.loads(result.raw_json)
@@ -362,10 +365,10 @@ class TestToolsAndAudit(unittest.TestCase):
 
         def fake_chat_complete(client, model, system_prompt, user_prompt, temperature=0):
             captured_prompt["user_prompt"] = user_prompt
-            return json.dumps(mocked_json)
+            return json.dumps(mocked_json), {"prompt_total": 0, "prompt_cached": 0, "prompt_uncached": 0, "completion": 0}
 
         with patch("Agent.app.audit.engine.retrieve_top_articles", return_value=[legal_articles[0]]):
-            with patch("Agent.app.audit.engine.chat_complete", side_effect=fake_chat_complete):
+            with patch("Agent.app.audit.engine.chat_complete_with_usage", side_effect=fake_chat_complete):
                 with patch("Agent.app.audit.engine.create_openai_client", return_value=object()):
                     result = run_audit(contract_text, legal_articles, config)
         data = json.loads(result.raw_json)

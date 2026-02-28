@@ -21,3 +21,4 @@ class LegalArticleRef:
 @dataclass(frozen=True)
 class AuditResult:
     raw_json: str
+    token_usage: Optional[dict[str, int]] = None

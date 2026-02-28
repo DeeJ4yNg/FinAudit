@@ -3,7 +3,11 @@ import re
 
 from Agent.app.config import AppConfig
 from Agent.app.legal.retrieval import retrieve_top_articles
-from Agent.app.llm.openai_client import chat_complete, create_openai_client, ensure_json
+from Agent.app.llm.openai_client import (
+    chat_complete_with_usage,
+    create_openai_client,
+    ensure_json,
+)
 from Agent.app.audit.prompt import (
     build_chunk_user_prompt,
     build_summary_prompt,
@@ -49,15 +53,15 @@ def run_audit(
         api_key=config.openai_api_key,
         base_url=config.openai_base_url,
     )
-    response_text = chat_complete(
+    response_text, token_usage = chat_complete_with_usage(
         client=client,
         model=config.model,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
     )
     json_text = ensure_json(response_text)
-    _validate_json(json_text)
-    return AuditResult(raw_json=json_text)
+    json_text = _normalize_json(json_text)
+    return AuditResult(raw_json=json_text, token_usage=token_usage)
 
 
 def _run_chunked_audit(
@@ -76,6 +80,7 @@ def _run_chunked_audit(
         base_url=config.openai_base_url,
     )
     results: list[str] = []
+    total_usage = _empty_token_usage()
     total = len(chunks)
     for index, chunk in enumerate(chunks, start=1):
         logger.info(
@@ -98,29 +103,31 @@ def _run_chunked_audit(
             chunk_index=index,
             chunk_total=total,
         )
-        response_text = chat_complete(
+        response_text, usage = chat_complete_with_usage(
             client=client,
             model=config.model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
         json_text = ensure_json(response_text)
-        _validate_json(json_text)
+        json_text = _normalize_json(json_text)
         results.append(json_text)
+        _merge_token_usage(total_usage, usage)
         logger.info(
             "chunk_done %s",
             safe_json({"index": index, "total": total}),
         )
     summary_prompt = build_summary_prompt(results, memory)
-    summary_text = chat_complete(
+    summary_text, summary_usage = chat_complete_with_usage(
         client=client,
         model=config.model,
         system_prompt=system_prompt,
         user_prompt=summary_prompt,
     )
     summary_json = ensure_json(summary_text)
-    _validate_json(summary_json)
-    return AuditResult(raw_json=summary_json)
+    summary_json = _normalize_json(summary_json)
+    _merge_token_usage(total_usage, summary_usage)
+    return AuditResult(raw_json=summary_json, token_usage=total_usage)
 
 
 def _format_legal_context(articles: list[LegalArticle]) -> str:
@@ -197,9 +204,21 @@ def _law_retrieval_label(mode: int) -> str:
     return "unknown"
 
 
-def _validate_json(json_text: str) -> None:
+def _normalize_json(json_text: str) -> str:
     data = json.loads(json_text)
     if "summary" not in data:
         raise ValueError("Missing summary")
-    if "risks" not in data:
-        raise ValueError("Missing risks")
+    if "risks" not in data or not isinstance(data.get("risks"), list):
+        data["risks"] = []
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _empty_token_usage() -> dict[str, int]:
+    return {"prompt_total": 0, "prompt_cached": 0, "prompt_uncached": 0, "completion": 0}
+
+
+def _merge_token_usage(total: dict[str, int], delta: dict[str, int]) -> None:
+    total["prompt_total"] += int(delta.get("prompt_total", 0) or 0)
+    total["prompt_cached"] += int(delta.get("prompt_cached", 0) or 0)
+    total["prompt_uncached"] += int(delta.get("prompt_uncached", 0) or 0)
+    total["completion"] += int(delta.get("completion", 0) or 0)
